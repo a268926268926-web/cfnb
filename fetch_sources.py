@@ -1,162 +1,270 @@
 # -*- coding: utf-8 -*-
 """
-fetch_sources.py — 多源聚合优选池（全自动，产出 30 个）
-所有源都是"活"的：各源随上游作者/频道实时更新，本脚本每次运行时重新拉取最新数据。
+fetch_sources.py — 多源聚合筛选器（全自动，产出 30 个候选池）
 
-源清单（6 个活源，按优先级配额）：
-  S1 zip.cm.edu.kg/all.json        CM 全量库（15176 条，含 colo 落地字段）→ 精筛 NRT/JP/TW
-  S2 ip.v2too.top/api/nodes        亦心の优选IP 官方接口（江西电信 500M 实测，carrier=ct 电信条目）
-  S3 t.me/s/danfeng2               丹枫频道（每 6h 一条精品 NRT 元数据帖，解析 HTML 拿 IP:端口）
-  S4 t.me/s/cfyxip                 亦心频道网页预览（每小时电信/移动榜单，解析 code 块 IP）
-  S5 LancelotRar/best-cf-ips       GitHub 聚合库（多源聚合去重+国家标注，每 3h 扫描 top100）
-  S6 joname1/BestCFip              GitHub 聚合库（每 4h 构建，聚合 7 个上游源）
-  备用: addressesapi.090227.xyz/ct|cmcc（CM 分 ISP 小库）、svip-s/cloudflare_ip（每小时，陕西移动视角）
+职责定位（2026-09-15 按用户口径修订）：
+  聚合器只做三件"过滤"的事——去掉不要的地区、去掉不要的端口、去掉重复 IP。
+  **不做质量裁决**：质量由下游 cfnb 实测（TCP→可用性→带宽）决定，实测才是唯一真东西。
 
-产出: zip_nrt.txt（30 个，IP:port#国家码 格式，cfnb ADDITIONAL_SOURCES file:// 源）
+源清单（活源，各自随上游实时更新）：
+  S1 zip.cm.edu.kg/all.json        CM 全量库（含 colo 落地字段；注：其 IP 为反代入口性质，实测可用）
+  S2 ip.v2too.top/api/nodes        亦心の优选IP 官方接口（江西电信 500M 实测，carrier=ct）
+  S3 t.me/s/danfeng2               丹枫频道（每 6h 精品 NRT 帖）
+  S4 t.me/s/cfyxip                 亦心频道网页预览（每小时电信/移动榜单）
+  S5 LancelotRar/best-cf-ips       聚合库（3h 扫描 top100）
+  S6 joname1/BestCFip             聚合库（4h 构建，7 上游）
+  S7 addressesapi.090227.xyz/ct    CM 分 ISP 库（电信专属，小但精准）
+  S8 svip-s/cloudflare_ip         每小时更新（陕西移动视角）
+
+筛选规则：
+  地区白名单（含配额）：NRT 10 / JP 4 / TW 4 / SG 6 / US 6
+  端口优先级：443 > 2087 > 2053/2083/2096/8443
+  去重：同 IP 只留一条，保留其最优端口
+  产出：zip_nrt.txt（30 个，IP:port#国家码）
 """
-import json, io, os, re, urllib.request
+import ipaddress, json, io, os, re, urllib.request
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(DIR, "zip_nrt.txt")
-TARGET = 30
 TIMEOUT = 60
-UA = {"User-Agent": "Mozilla/5.0 cfnb-sources/2.0"}
+UA = {"User-Agent": "Mozilla/5.0 cfnb-sources/3.0"}
+
+# ---------- 筛选规则 ----------
+REGION_QUOTA = {"NRT": 10, "JP": 4, "TW": 4, "SG": 6, "US": 6}   # 合计 30
+PORT_QUOTA = {443: 20, 2087: 4, 2053: 2, 2083: 2, 2096: 1, 8443: 1}  # 端口配额（群实测优先级：443>2087>其余 TLS）
+PORT_ORDER = [443, 2087, 2053, 2083, 2096, 8443]                  # 群实测：443 被 Q 最少，2087 次之
+ALLOWED_PORTS = set(PORT_ORDER)
 
 def http_get(url, timeout=TIMEOUT):
     req = urllib.request.Request(url, headers=UA)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="ignore")
 
-# ---------- 各源解析函数，返回 [(ip, port, 国家码, 来源标签)] ----------
+# 落地区域归一：把各种来源的地区标识统一成 NRT/JP/TW/SG/US（其余丢弃）
+REGION_ALIAS = {
+    "NRT": "NRT", "JP": "JP", "JPN": "JP", "JAPAN": "JP", "TOKYO": "JP", "OSAKA": "JP",
+    "TW": "TW", "TWN": "TW", "TAIWAN": "TW", "TPE": "TW", "TAIPEI": "TW",
+    "SG": "SG", "SGP": "SG", "SIN": "SG", "SINGAPORE": "SG",
+    "US": "US", "USA": "US", "LAX": "US", "SJC": "US", "SEA": "US", "SFO": "US",
+}
+def norm_region(raw):
+    return REGION_ALIAS.get((raw or "").strip().upper(), None)
 
-def src_zip():  # S1: CM 全量库 → NRT 落地 / JP / TW
+def pick_port(ports):
+    """从候选端口列表里按 PORT_ORDER 优先级挑一个；都不在白名单则返回 None"""
+    for p in PORT_ORDER:
+        if p in ports:
+            return p
+    return None
+
+# ---------- 各源解析：统一返回 [(ip, [ports...], 地区标识原始值, 来源标签)] ----------
+
+def src_zip():
     data = json.loads(http_get("https://zip.cm.edu.kg/all.json"))
-    items = data.get("data", [])
-    nrt, jp, tw = [], [], []
-    for it in items:
+    out = []
+    for it in data.get("data", []):
         ip = it.get("ip"); ports = it.get("port") or []
         meta = it.get("meta") or {}
         colo = (meta.get("colo") or {}).get("iata", "")
         cc = meta.get("country", "")
-        port = 443 if 443 in ports else (ports[0] if ports else None)
-        if not ip or not port:
-            continue
-        rec = (ip, port, cc or "XX")
-        if colo == "NRT":
-            nrt.append(rec)
-        elif cc == "JP":
-            jp.append(rec)
-        elif cc == "TW":
-            tw.append(rec)
-    out = []
-    quota = {"nrt": 10, "jp": 4, "tw": 4}   # 18 个
-    seen = set()
-    def take(pool, n):
-        got = 0
-        for ip, port, cc in pool:
-            if got >= n: break
-            if ip in seen: continue
-            seen.add(ip); out.append((ip, port, cc, "CMzip")); got += 1
-    take(nrt, quota["nrt"]); take(jp, quota["jp"]); take(tw, quota["tw"])
-    if len(out) < 18:
-        take(nrt, 18)
-    print(f"[S1 CMzip] {len(out)} 个（NRT库{len(nrt)}/JP库{len(jp)}/TW库{len(tw)}）")
+        region = colo if colo else cc          # 优先用落地机房（NRT/TPE/SIN...），否则原生国家
+        out.append((ip, ports, region, "CMzip"))
+    print(f"[S1 CMzip] 候选 {len(out)}")
     return out
 
-def src_v2too():  # S2: 亦心官方接口，只取电信(ct)条目，按速度排序
+def src_v2too():
     try:
         arr = json.loads(http_get("https://ip.v2too.top/api/nodes", timeout=20))
         ct = [x for x in arr if x.get("carrier") == "ct" and x.get("speed", 0) > 0.05]
         ct.sort(key=lambda x: -x.get("speed", 0))
-        # 国家码用落地 region 映射（SIN→SG 等），保证两位 ISO 码可解析
-        region_map = {"SIN": "SG", "HKG": "HK", "NRT": "JP", "LAX": "US", "SJC": "US"}
-        out = [(x["ip"], 443, region_map.get(x.get("region", ""), "SG"), "v2too") for x in ct[:6]]
-        print(f"[S2 v2too] {len(out)} 个（电信条目总数 {len(ct)}）")
+        out = [(x["ip"], [443], x.get("region", ""), "v2too") for x in ct]
+        print(f"[S2 v2too] 候选 {len(out)}")
         return out
     except Exception as e:
         print(f"[S2 v2too] 失败: {e}")
         return []
 
-def src_tg_text(url, max_ips):  # S3/S4 通用：t.me/s 网页预览解析
+def src_tg_text(url, tag):
+    raw = None
+    for attempt in range(1, 3):
+        try:
+            raw = http_get(url, timeout=25)
+            break
+        except Exception as e:
+            print(f"[{tag}] 第{attempt}次失败: {e}")
+    if raw is None:
+        return []
     try:
-        raw = http_get(url, timeout=25)
         blocks = re.findall(r'tgme_widget_message_text[^>]*>(.*?)</div>', raw, re.S)
-        ips = []
-        for b in blocks:  # 时间序：页面从旧到新，取最新的块优先
+        out, seen = [], set()
+        for b in reversed(blocks):                 # 倒序 = 最新帖优先
             text = re.sub(r'<[^>]+>', ' ', b)
             text = re.sub(r'█+', ' ', text)
+            # 帖子里"地区"信息（香港/新加坡/日本…）
+            region_hint = ""
+            for kw, code in (("日本", "NRT"), ("东京", "NRT"), ("新加坡", "SG"), ("台湾", "TW"),
+                             ("香港", "HK"), ("美国", "US"), ("洛杉矶", "US")):
+                if kw in text:
+                    region_hint = code; break
             for m in re.finditer(r'\b(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{2,5}))?\b', text):
                 ip = m.group(1)
-                if ip not in [p[0] for p in ips]:
-                    ips.append((ip, int(m.group(2)) if m.group(2) else 443, "CF", url.split('/')[-1]))
-            if len(ips) >= max_ips:
-                break
-        print(f"[{url.split('/')[-1]}] {len(ips[:max_ips])} 个")
-        return ips[:max_ips]
+                if ip in seen:
+                    continue
+                seen.add(ip)
+                out.append((ip, [int(m.group(2)) if m.group(2) else 443], region_hint, tag))
+        print(f"[{tag}] 候选 {len(out)}")
+        return out
     except Exception as e:
-        print(f"[{url.split('/')[-1]}] 失败: {e}")
+        print(f"[{tag}] 失败: {e}")
         return []
 
-def src_lancelot():  # S5: best-cf-ips top100（昨天扫描，聚合+标注）
+def _parse_plain_lines(url, tag):
     try:
-        raw = http_get("https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top100.txt", timeout=20)
+        raw = http_get(url, timeout=20)
         out = []
         for line in raw.splitlines():
-            m = re.match(r'(\d+\.\d+\.\d+\.\d+):(\d+)#([A-Z]{2})', line.strip())
+            line = line.strip()
+            m = re.match(r'(\d+\.\d+\.\d+\.\d+)(?::(\d+))?(?:#([A-Za-z]{2,10}))?', line)
             if m:
-                out.append((m.group(1), int(m.group(2)), m.group(3), "Lancelot"))
-        print(f"[S5 Lancelot] {len(out[:5])} 个（源总数 {len(out)}）")
-        return out[:5]
+                out.append((m.group(1), [int(m.group(2))] if m.group(2) else [443],
+                            m.group(3) or "", tag))
+        print(f"[{tag}] 候选 {len(out)}")
+        return out
     except Exception as e:
-        print(f"[S5 Lancelot] 失败: {e}")
+        print(f"[{tag}] 失败: {e}")
         return []
 
-def src_joname1():  # S6: BestCFip ipv4.txt（4h 构建，聚合 7 源）
-    try:
-        raw = http_get("https://raw.githubusercontent.com/joname1/BestCFip/refs/heads/main/ipv4.txt", timeout=20)
-        out = []
-        for line in raw.splitlines():
-            m = re.match(r'(\d+\.\d+\.\d+\.\d+):(\d+)#([A-Z]{2})', line.strip())
-            if m:
-                out.append((m.group(1), int(m.group(2)), m.group(3), "BestCFip"))
-        print(f"[S6 BestCFip] {len(out[:5])} 个（源总数 {len(out)}）")
-        return out[:5]
-    except Exception as e:
-        print(f"[S6 BestCFip] 失败: {e}")
-        return []
+def src_lancelot():
+    return _parse_plain_lines(
+        "https://raw.githubusercontent.com/LancelotRar/best-cf-ips/main/best-cf-ip-scanned-top100.txt", "Lancelot")
+
+def src_joname1():
+    return _parse_plain_lines(
+        "https://raw.githubusercontent.com/joname1/BestCFip/refs/heads/main/ipv4.txt", "BestCFip")
+
+def src_addressesapi():
+    out = []
+    for path, tag in (("ct", "CM-ct"), ("cmcc", "CM-cmcc")):
+        try:
+            raw = http_get(f"https://addressesapi.090227.xyz/{path}", timeout=15)
+            for line in raw.splitlines():
+                m = re.match(r'(\d+\.\d+\.\d+\.\d+)(?:#\w+)?', line.strip())
+                if m:
+                    out.append((m.group(1), [443], "", tag))
+        except Exception as e:
+            print(f"[{tag}] 失败: {e}")
+    print(f"[S7 CM-addressesapi] 候选 {len(out)}")
+    return out
+
+def src_svip():
+    return _parse_plain_lines(
+        "https://raw.githubusercontent.com/svip-s/cloudflare_ip/refs/heads/main/best_ips.txt", "svip-s")
+
+# ---------- 主流程 ----------
 
 def main():
-    pool, seen = [], set()
     sources = [
         ("S1 CMzip", src_zip),
         ("S2 v2too", src_v2too),
-        ("S3 danfeng2", lambda: src_tg_text("https://t.me/s/danfeng2", 4)),
-        ("S4 cfyxip", lambda: src_tg_text("https://t.me/s/cfyxip", 4)),
+        ("S3 danfeng2", lambda: src_tg_text("https://t.me/s/danfeng2", "danfeng2")),
+        ("S4 cfyxip", lambda: src_tg_text("https://t.me/s/cfyxip", "cfyxip")),
         ("S5 Lancelot", src_lancelot),
         ("S6 BestCFip", src_joname1),
+        ("S7 addressesapi", src_addressesapi),
+        ("S8 svip-s", src_svip),
     ]
+
+    raw_pool = []
     for name, fn in sources:
         try:
-            items = fn()
+            raw_pool.extend(fn())
         except Exception as e:
-            print(f"[{name}] 异常: {e}"); items = []
-        for ip, port, cc, tag in items:
-            if ip in seen:
+            print(f"[{name}] 异常: {e}")
+
+    print(f"\n原始候选合计: {len(raw_pool)}")
+
+    # ---- 过滤 1+2+3：地区白名单 → 端口白名单 → IP 去重（保留最优端口）----
+    dedup, dropped_region, dropped_port = {}, 0, 0
+    for ip, ports, region_raw, tag in raw_pool:
+        if not ip or not re.match(r'^\d+\.\d+\.\d+\.\d+$', ip):
+            continue
+        region = norm_region(region_raw)
+        if not region or region not in REGION_QUOTA:
+            dropped_region += 1
+            continue
+        # 端口白名单内全留（同 IP 不同端口=不同路由，分开保留）
+        valid = [p for p in PORT_ORDER if p in set(ports or [])]
+        if not valid:
+            dropped_port += 1
+            continue
+        for port in valid:
+            if port not in PORT_QUOTA:
                 continue
-            seen.add(ip)
-            pool.append((ip, port, cc, tag))
+            key = f"{ip}:{port}"
+            if key in dedup:
+                continue                  # 同 IP+端口重复，跳过
+            dedup[key] = {"ip": ip, "port": port, "region": region, "tag": tag}
 
-    print(f"\n聚合后唯一 IP 总数: {len(pool)}")
+    print(f"地区过滤丢弃: {dropped_region} | 端口过滤丢弃: {dropped_port} | 去重后(IP+端口): {len(dedup)}")
 
-    # 国家码兜底：非标准码统一为 "CF"
-    lines = []
-    for ip, port, cc, tag in pool[:TARGET]:
-        cc = cc if re.match(r'^[A-Z]{2}$', cc or "") else "CF"
-        lines.append(f"{ip}:{port}#{cc}")
+    # ---- 地区配额主导 + 地区内多源轮询（保配比 + 保多样性）----
+    from collections import defaultdict, Counter
+    by_region = defaultdict(lambda: defaultdict(list))
+    for rec in dedup.values():
+        by_region[rec["region"]][rec["tag"]].append(rec)
 
-    # 数量不足则补告警（30 个目标）
-    if len(lines) < TARGET:
-        print(f"[warn] 仅产出 {len(lines)}/{TARGET}，源质量波动属正常，下次运行自动补齐")
+    selected = []
+    port_used = {p: 0 for p in PORT_QUOTA}
+    for region, quota in REGION_QUOTA.items():
+        src_map = by_region.get(region, {})
+        # 每个源内部：端口优先级排序
+        for tag in src_map:
+            src_map[tag].sort(key=lambda x: PORT_ORDER.index(x["port"]) if x["port"] in PORT_ORDER else 99)
+        picked, cursor = [], {t: 0 for t in src_map}
+        while len(picked) < quota:
+            progressed = False
+            for tag in list(src_map.keys()):
+                if len(picked) >= quota:
+                    break
+                # 跳过端口配额已满的候选
+                while cursor[tag] < len(src_map[tag]):
+                    cand = src_map[tag][cursor[tag]]
+                    pk = cand["port"]
+                    if port_used.get(pk, 0) < PORT_QUOTA.get(pk, 0):
+                        break
+                    cursor[tag] += 1
+                if cursor[tag] < len(src_map[tag]):
+                    cand = src_map[tag][cursor[tag]]
+                    cursor[tag] += 1
+                    port_used[cand["port"]] += 1
+                    picked.append(cand)
+                    progressed = True
+            if not progressed:
+                break                       # 该地区候选耗尽
+        selected.extend(picked)
+        if len(picked) < quota:
+            print(f"[warn] {region} 仅 {len(picked)}/{quota}（候选不足）")
+
+    # 若总数不足 30：从各源剩余候选中按端口优先级补
+    if len(selected) < sum(REGION_QUOTA.values()):
+        used = {r["ip"] for r in selected}
+        spare = [r for r in dedup.values() if r["ip"] not in used]
+        spare.sort(key=lambda x: (PORT_ORDER.index(x["port"]) if x["port"] in PORT_ORDER else 99))
+        selected.extend(spare[: sum(REGION_QUOTA.values()) - len(selected)])
+
+    # 输出国家码：机场码 → ISO 国家码（NRT/SIN/TPE 等机场码 cfnb 解析器不认）
+    OUT_CODE = {"NRT": "JP", "JP": "JP", "TW": "TW", "SG": "SG", "US": "US"}
+    lines = [f'{r["ip"]}:{r["port"]}#{OUT_CODE.get(r["region"], r["region"])}' for r in selected]
+
+    # ---- 统计输出 ----
+    from collections import Counter
+    print("\n产出地区分布:", dict(Counter(r["region"] for r in selected)))
+    print("产出端口分布:", dict(Counter(r["port"] for r in selected)))
+    print("产出源分布:  ", dict(Counter(r["tag"] for r in selected)))
+
+    if len(lines) < 30:
+        print(f"[warn] 仅 {len(lines)}/30（源波动正常，下次运行自动补齐）")
+
     with io.open(OUT, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"\n[done] 产出 {len(lines)} 个 → {OUT}")
