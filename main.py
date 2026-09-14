@@ -686,6 +686,18 @@ def fetch_additional_source(url):
     if not url:
         return []
 
+    # 本地文件源（file:/// 路径），由前置脚本（如 fetch_zip_nrt.py）产出
+    if url.startswith("file://"):
+        local = url[len("file://"):]
+        try:
+            with open(local, "r", encoding="utf-8") as f:
+                nodes = parse_adaptive(f.read())
+            print(f"从本地源 {local} 解析出 {len(nodes)} 个节点。")
+            return nodes
+        except Exception as e:
+            print(f"读取本地源失败 ({local}): {e}")
+            return []
+
     for attempt in range(1, FETCH_MAX_RETRIES + 1):
         try:
             print(f"正在请求数据源 {url} (尝试 {attempt}/{FETCH_MAX_RETRIES}) ...")
@@ -1252,7 +1264,7 @@ def measure_bandwidth_curl(node_str):
         "-w", "%{size_download} %{time_starttransfer} %{time_total}",
         "-L",
         "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "--http2",
+        "--http1.1",  # 本机 curl (mingw/system32) 不支持 --http2，会直接退出码2
         "--noproxy", "*",
         "--resolve", f"speed.cloudflare.com:{port}:{ip}",
         "--connect-timeout", str(BANDWIDTH_CONNECT_TIMEOUT),
@@ -1260,10 +1272,16 @@ def measure_bandwidth_curl(node_str):
     ] + insecure_flag + [url]   # 动态添加 --insecure（如果是 https）
 
     try:
-        result = subprocess.run(curl_cmd, capture_output=True, text=True,
+        # 注意：必须使用 bytes 模式（不加 text=True/encoding），
+        # 否则 subprocess 内部 reader 线程在 Windows 下按 utf-8 解码管道时，
+        # 遇到 curl 输出中的非 UTF-8 字节（如 GBK 区域设置的本地化消息）会在
+        # _readerthread 中抛出 UnicodeDecodeError，导致整个测速线程崩溃。
+        result = subprocess.run(curl_cmd, capture_output=True,
                                 timeout=BANDWIDTH_TIMEOUT + BANDWIDTH_PROCESS_BUFFER)
-        if result.returncode == 0 and result.stdout.strip():
-            parts = result.stdout.strip().split()
+        stdout_str = (result.stdout or b"").decode("utf-8", errors="replace")
+        stderr_str = (result.stderr or b"").decode("utf-8", errors="replace")
+        if result.returncode == 0 and stdout_str.strip():
+            parts = stdout_str.strip().split()
             if len(parts) >= 3:
                 size_bytes = float(parts[0])
                 if size_bytes < expected_size:
@@ -1274,6 +1292,9 @@ def measure_bandwidth_curl(node_str):
                 if transfer_time > 0:
                     speed_mbps = (size_bytes * 8) / (transfer_time * 1000 * 1000)
                     return (node_str, speed_mbps)
+        elif stderr_str.strip():
+            # curl 失败时打印其错误信息（已安全解码），便于排查
+            print(f"\n[带宽测速] {node_str} curl 退出码 {result.returncode}: {stderr_str.strip().splitlines()[0]}")
     except Exception:
         pass
     return (node_str, 0)
@@ -1609,6 +1630,8 @@ def sync_to_github():
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 creationflags=creationflags
             )
 

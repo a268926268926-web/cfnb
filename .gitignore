@@ -2,3 +2,16 @@
 git_sync.ps1
 git_sync.sh
 __pycache__/
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+
+# runtime logs & temp
+scheduled_run.log
+*.log
+zip_nrt.txt
+.mimosa/
