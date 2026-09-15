@@ -124,7 +124,7 @@
     "_comment_AVAILABILITY_CONNECT_TIMEOUT": "可用性 API 连接超时（秒）",
     "AVAILABILITY_RETRY_MAX": 2,
     "_comment_AVAILABILITY_RETRY_MAX": "可用性检测整体失败（通过率为0）时的最大重试轮数",
-    "AVAILABILITY_RETRY_DELAY": 3,
+    "AVAILABILITY_RETRY_DELAY": 10,
     "_comment_AVAILABILITY_RETRY_DELAY": "可用性检测重试间隔（秒）",
     "AVAILABILITY_INNER_RETRY_ENABLED": true,
     "_comment_AVAILABILITY_INNER_RETRY_ENABLED": "可用性检测是否启用单节点内部重试",

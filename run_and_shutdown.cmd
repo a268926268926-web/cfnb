@@ -11,6 +11,9 @@ set WAS_AWAKE=0
 tasklist 2>nul | findstr /C:"explorer.exe" >nul
 if not errorlevel 1 set WAS_AWAKE=1
 echo [%date% %time%] was_awake=%WAS_AWAKE% >> "%~dp0scheduled_run.log"
+rem check if sing-box is running (warn if active, does not block)
+tasklist 2>nul | findstr /C:"sing-box.exe" >nul
+if not errorlevel 1 echo [%date% %time%] WARN: sing-box process detected, results may be proxied >> "%~dp0scheduled_run.log"
 
 "C:\Users\Galbrena\AppData\Local\Programs\Python\Python313\python.exe" "C:\Users\Galbrena\.zcode\workspace\default\cfnb\fetch_sources.py" >> "%~dp0scheduled_run.log" 2>&1
 "C:\Users\Galbrena\AppData\Local\Programs\Python\Python313\python.exe" "C:\Users\Galbrena\.zcode\workspace\default\cfnb\main.py" >> "%~dp0scheduled_run.log" 2>&1

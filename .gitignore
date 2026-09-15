@@ -15,3 +15,7 @@ scheduled_run.log
 *.log
 zip_nrt.txt
 .mimosa/
+
+# local admin tool (holds ADMIN password) - never commit
+panel_api.py
+zip_nrt.txt
