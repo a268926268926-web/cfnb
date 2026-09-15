@@ -30,8 +30,9 @@ TIMEOUT = 60
 UA = {"User-Agent": "Mozilla/5.0 cfnb-sources/3.0"}
 
 # ---------- 筛选规则 ----------
-REGION_QUOTA = {"NRT": 10, "JP": 4, "TW": 4, "SG": 6, "US": 6}   # 合计 30
-PORT_QUOTA = {443: 20, 2087: 4, 2053: 2, 2083: 2, 2096: 1, 8443: 1}  # 端口配额（群实测优先级：443>2087>其余 TLS）
+# 冗余设计：cfnb 实测会淘汰一部分，故候选池按 3 倍供给（90 → 实测取前 30）
+REGION_QUOTA = {"NRT": 30, "JP": 12, "TW": 12, "SG": 18, "US": 18}   # 合计 90
+PORT_QUOTA = {443: 60, 2087: 12, 2053: 6, 2083: 6, 2096: 3, 8443: 3}  # 端口配额 x3（群实测优先级：443>2087>其余 TLS）
 PORT_ORDER = [443, 2087, 2053, 2083, 2096, 8443]                  # 群实测：443 被 Q 最少，2087 次之
 ALLOWED_PORTS = set(PORT_ORDER)
 
@@ -245,12 +246,14 @@ def main():
         if len(picked) < quota:
             print(f"[warn] {region} 仅 {len(picked)}/{quota}（候选不足）")
 
-    # 若总数不足 30：从各源剩余候选中按端口优先级补
-    if len(selected) < sum(REGION_QUOTA.values()):
-        used = {r["ip"] for r in selected}
-        spare = [r for r in dedup.values() if r["ip"] not in used]
+    # 若总数不足配额：从剩余候选补（严格不超总配额；按端口优先级）
+    TOTAL_QUOTA = sum(REGION_QUOTA.values())
+    if len(selected) < TOTAL_QUOTA:
+        used = {f'{r["ip"]}:{r["port"]}' for r in selected}
+        spare = [r for r in dedup.values() if f'{r["ip"]}:{r["port"]}' not in used]
         spare.sort(key=lambda x: (PORT_ORDER.index(x["port"]) if x["port"] in PORT_ORDER else 99))
-        selected.extend(spare[: sum(REGION_QUOTA.values()) - len(selected)])
+        selected.extend(spare[: TOTAL_QUOTA - len(selected)])
+    selected = selected[:TOTAL_QUOTA]
 
     # 输出国家码：机场码 → ISO 国家码（NRT/SIN/TPE 等机场码 cfnb 解析器不认）
     OUT_CODE = {"NRT": "JP", "JP": "JP", "TW": "TW", "SG": "SG", "US": "US"}
@@ -262,8 +265,8 @@ def main():
     print("产出端口分布:", dict(Counter(r["port"] for r in selected)))
     print("产出源分布:  ", dict(Counter(r["tag"] for r in selected)))
 
-    if len(lines) < 30:
-        print(f"[warn] 仅 {len(lines)}/30（源波动正常，下次运行自动补齐）")
+    if len(lines) < 90:
+        print(f"[warn] 仅 {len(lines)}/90（源波动正常，下次运行自动补齐）")
 
     with io.open(OUT, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

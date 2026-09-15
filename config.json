@@ -2,7 +2,7 @@
     "_comment": "Cloudflare IP 优选工具配置文件 - 请根据需求修改下方参数",
     "USE_GLOBAL_MODE": true,
     "_comment_USE_GLOBAL_MODE": "true=全局最优15个；false=每个国家最优1个",
-    "GLOBAL_TOP_N": 15,
+    "GLOBAL_TOP_N": 30,
     "_comment_GLOBAL_TOP_N": "全局模式下最终保留的节点数量",
     "PER_COUNTRY_TOP_N": 1,
     "_comment_PER_COUNTRY_TOP_N": "分国家模式下每个国家保留的节点数量",
@@ -20,9 +20,12 @@
     "_comment_SOCKET_DEFAULT_TIMEOUT": "全局 Socket 默认超时（秒），防止永久阻塞",
     "PROGRESS_PRINT_INTERVAL": 1,
     "_comment_PROGRESS_PRINT_INTERVAL": "进度打印刷新间隔（秒），避免频繁 I/O",
-    "FILTER_COUNTRIES_ENABLED": false,
+    "FILTER_COUNTRIES_ENABLED": true,
     "_comment_FILTER_COUNTRIES_ENABLED": "前置白名单开关（true=仅保留下方 ALLOWED_COUNTRIES 中的国家，其余在 TCP 测试前剔除）",
     "ALLOWED_COUNTRIES": [
+        "JP",
+        "TW",
+        "SG",
         "US"
     ],
     "_comment_ALLOWED_COUNTRIES": "前置白名单列表（仅在 FILTER_COUNTRIES_ENABLED=true 时生效）",
@@ -35,7 +38,12 @@
     "PRE_FILTER_PORT_ENABLED": true,
     "_comment_PRE_FILTER_PORT_ENABLED": "是否在 TCP 测试前过滤端口（仅保留下方指定的端口）",
     "PRE_FILTER_PORTS": [
-        443
+        443,
+        2087,
+        2053,
+        2083,
+        2096,
+        8443
     ],
     "_comment_PRE_FILTER_PORTS": "TCP 测试前允许的端口列表（可多端口）",
     "ENABLE_WXPUSHER": false,
