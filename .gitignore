@@ -1,4 +1,4 @@
-﻿config.json
+config.json
 git_sync.ps1
 git_sync.sh
 __pycache__/
@@ -19,3 +19,53 @@ zip_nrt.txt
 # local admin tool (holds ADMIN password) - never commit
 panel_api.py
 zip_nrt.txt
+
+# local-only diagnostics: e2e_test.py 内含订阅 TOKEN；面板配置备份与手机侧副本一律不入库
+e2e_test.py
+push_api.py
+phone_check.py
+ech_eval.py
+ech_bench.py
+panel_config_*.json
+panel_config_before.txt
+node0_path.txt
+run_log_utf8.txt
+analysis_tmp.txt
+probe_out.txt
+probe_all.txt
+phone/
+box.db
+# 2026-09-18: 官方段/池历史/手机对照 的本地产物
+cf_ranges.txt
+_battery.py
+_battery.txt
+_asn.txt
+_diag.txt
+run_stability.txt
+run_official.txt
+phone_rank.json
+phone_rank.md
+test_stability.py
+pool_history.json
+
+# 2026-09-21: 自建动态优选域名（DNSHE）与本轮改动引入的本地产物
+# dnshe_sync.py 只从环境变量读密钥，本文件本身不含密钥；但它的 --apply 会改线上 A 记录，
+# 且同目录会落 sync 日志，按本项目"本地运维脚本不入库"的惯例一并忽略。
+dnshe_sync.py
+dnshe.env
+source_health.json
+vps/
+proxy_watchdog.cmd
+proxy_watchdog.log
+panel_a_add_backup_*.txt
+zip_nrt.bak_*.txt
+run_and_shutdown.cmd.bak_*
+ip.txt.before_*
+config.json.bak_*
+main.py.bak
+_test_pool_history.json
+dnshe.env
+
+# Argo 出口凭据（绝不提交）
+argo_secret.txt
+vps/argo_secret.txt
