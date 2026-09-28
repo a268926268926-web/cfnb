@@ -6,7 +6,7 @@ fetch_sources.py — 多源聚合筛选器（全自动，产出 120 个候选池
   聚合器只做三件"过滤"的事——去掉不要的地区、去掉不要的端口、去掉重复 IP。
   **不做质量裁决**：质量由下游 cfnb 实测（TCP→可用性→带宽）决定，实测才是唯一真东西。
 
-源清单（活源，各自随上游实时更新；2026-09-22 求量扩源后共 23 个源槽位）：
+源清单（活源，各自随上游实时更新；2026-09-28 BCFIP 批次后共 30 个源槽位）：
   S1 zip.cm.edu.kg/all.json        CM 全量库（含 colo 落地字段；注：其 IP 为反代入口性质，实测可用）
   S2 ip.v2too.top/api/nodes        亦心の优选IP 官方接口（江西电信 500M 实测，carrier=ct）
   S3 t.me/s/danfeng2               丹枫频道（每 6h 精品 NRT 帖）
@@ -22,6 +22,7 @@ fetch_sources.py — 多源聚合筛选器（全自动，产出 120 个候选池
   S14 优选域名解析（13 个公共优选域名 → 解析 → CF 段过滤）
   S15 优选订阅器解码（13 家，Mia 因 TG 门禁挂 dead）
   S16-S23 求量扩源批次（sanzang 元聚合/gslege 分国/luckyops/HHP/vipmc/辣子鸡全量/亚太top10/164746）
+  S24-S30 求量扩源批次二（doghelWang 边缘实测/BCFIP 系天诚·辣子鸡·洛璃·gslege分国·官方段合集·CM优选）
 
 死源剔除：任何源或订阅器连续 10 轮 0 候选 → source_health.json 标 dead，不再拉取；
 复活 = 删掉该键。
@@ -433,6 +434,93 @@ def src_ip164746():
         return []
 
 
+# ============ 2026-09-28 求量扩源批次二（doghelWang 边缘实测 + BCFIP 系六档） ============
+# 口径不变：聚合器只过滤不裁决。新源首轮拉不到不特殊处理，source_health.json 的
+# 连续 10 轮 0 候选自动标 dead 兜底。
+
+BOM = "\ufeff"   # U+FEFF：部分上游在文件头带 BOM（实测 doghelWang 那份就带），
+                # str.strip() 不吃它，不剥掉会平白丢掉第一条候选
+
+def _parse_remark_lines(url, tag):
+    """解析 `IP[:端口][#备注]` 一行一条的清单，并从**中文备注里**抽地区码。
+    为什么不套 _parse_plain_lines：它的地区正则 `#([A-Za-z]{2,10})` 在 BCFIP 系的备注上
+    必然抓错——`#Gslege优选 日本 JP` 抓成地区='Gslege'（丢真标签），
+    `#洛璃 | 新加坡 SG | IPv4` 干脆抓不到 → 整族高纯度源全部降级成无地区码。
+    2026-09-28 逐文件普查，本解析器能取出白名单码的条数：
+      tiancheng 80/122、lzj 117/206、luoli 14/26、gslege JP|SG|US 20/21/21、cmliu2 12/39。
+    只认 JP/TW/SG/US：REGION_ALIAS 之外的国别码（HK/KR/NL…）在下游与"无地区码"完全同路
+    （norm_region 返回 None → 官方段走 colo 实测、他人反代进 "?" 桶），抽出来只是噪音。
+    首行可能带 BOM（实测 doghelWang 那份就带），不剥掉会平白丢掉第一条。"""
+    try:
+        raw = http_get(url, timeout=20)
+        out = []
+        for line in raw.splitlines():
+            m = re.match(r'(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?(?:#(.*))?',
+                         line.strip().lstrip(BOM))
+            if not m:
+                continue
+            g = re.search(r'(?:^|[^A-Za-z])(JP|TW|SG|US)(?:[^A-Za-z]|$)', m.group(3) or "")
+            out.append((m.group(1), [int(m.group(2))] if m.group(2) else [443],
+                        g.group(1) if g else "", tag))
+        print(f"[{tag}] 候选 {len(out)}")
+        return out
+    except Exception as e:
+        print(f"[{tag}] 失败: {e}")
+        return []
+
+def src_doghelwang():
+    """树莓派+中国移动视角实测出的 CF 边缘 IP（每 2 小时刷新）：纯 IP:443 无标签，
+    16/16 落 CF 官方段 → 走下面统一的 colo 实测定区（本轮实测 colo 中位延迟受
+    HIJACK_TCP_MS 闸门保护，见 probe_colos）。"""
+    return _parse_remark_lines(
+        "https://raw.githubusercontent.com/doghelWang/cfdata-edge-ip/main/results/ip.txt",
+        "doghelWang")
+
+def src_bcfip_tiancheng():
+    """BCFIP/tiancheng 全量档：白名单地区覆盖最全的一份（SG/JP/TW/US 各 20 条）。"""
+    return _parse_remark_lines(
+        "https://raw.githubusercontent.com/jax861003/BCFIP/main/tiancheng/all.txt",
+        "BCFIP-天诚")
+
+def src_bcfip_lzj():
+    """BCFIP/lzj 全量档：与 S21（bestcf.pages.dev/lzj/all.txt）同上游、不同快照，
+    内容不重合 → 互为冗余，不是镜像。"""
+    return _parse_remark_lines(
+        "https://raw.githubusercontent.com/jax861003/BCFIP/main/lzj/all.txt", "BCFIP-辣子鸡")
+
+def src_bcfip_luoli():
+    """BCFIP/luoli：全管线唯一带 TW 标签的 ip-list 源（TW 池此前只靠订阅器补 1 条）。"""
+    return _parse_remark_lines(
+        "https://raw.githubusercontent.com/jax861003/BCFIP/main/luoli/all.txt", "BCFIP-洛璃")
+
+def src_bcfip_gslege():
+    """BCFIP/gslege 分国档：与 S17（gslege/CloudflareIP 仓库）同源不同仓，作镜像冗余。
+    65/65 落 CF 官方段，但备注自带 JP/SG/US 码，不必等 colo 实测。"""
+    out = []
+    for cc in ("JP", "SG", "US"):
+        out += _parse_remark_lines(
+            f"https://raw.githubusercontent.com/jax861003/BCFIP/main/gslege/{cc}.txt",
+            f"BCFIP-gslege-{cc}")
+    return out
+
+def src_bcfip_official():
+    """BCFIP 系纯官方段六档：合计 163 条、163/163 落 CF 官方段且无地区标签，
+    全部交 colo 实测定区（与 S9/S10 同一诚实口径）。"""
+    out = []
+    for path in ("nirevil/ipv4.txt", "cfyes/ipv4.txt", "vvhan/ipv4.txt",
+                 "entryip/50.txt", "mingyu/ipv4.txt", "ircf/ipv4.txt"):
+        out += _parse_remark_lines(
+            f"https://raw.githubusercontent.com/jax861003/BCFIP/main/{path}",
+            "BCFIP-" + path.split("/")[0])
+    return out
+
+def src_bcfip_cmliu2():
+    """BCFIP/cmliu2 混编档：12 条带白名单码（US8/SG2/JP2），其余按无地区码走。"""
+    return _parse_remark_lines(
+        "https://raw.githubusercontent.com/jax861003/BCFIP/main/cmliu2/all.txt",
+        "BCFIP-CM优选")
+
+
 # ============ 优选域名解析（2026-09-20 加，补"三测"里缺的那一测） ============
 # 背景：自建动态优选域名的 A 记录只能放 IPv4；公共优选域名是"会定期换 IP 的入口"，
 # 它的价值恰恰是解析出来的那批 IP 是别人替我们按运营商挑过的。所以正确做法不是
@@ -628,7 +716,9 @@ PREFERRED_SUBS = [
     ("58807", "https://58807.cc.cd"),
     ("CM官方", "https://sub.cmliussss.net"),
     ("Moist_R", "https://owo.o00o.ooo"),
-    ("洛璃", "https://loli.sub.us.ci"),
+    # 洛璃 2026-09-28 换新家：旧家 loli.sub.us.ci 与新家 xsub.cc.cd 是同一后端
+    # （当日实测：解码后 22/22 条有效，两家返回字节数一致），按上游通知改指新家。
+    ("洛璃", "https://xsub.cc.cd"),
     ("辣子鸡", "https://sub.lzjbaby.com"),
     ("S5公益", "https://sub.995677.xyz"),
     ("周润发", "https://zrf.zrf.me"),
@@ -732,6 +822,15 @@ def main():
         ("S21 辣子鸡全量", src_lzj_all),
         ("S22 亚太top10", src_weduolijia),
         ("S23 164746榜", src_ip164746),
+        # 2026-09-28 求量扩源批次二。BCFIP 系全部指明 owner=jax861003：同名的
+        # cai704/BCFIP 是另一份更旧的快照（非 fork、非镜像），独有文件为零，不接。
+        ("S24 doghelWang边缘", src_doghelwang),
+        ("S25 BCFIP-天诚", src_bcfip_tiancheng),
+        ("S26 BCFIP-辣子鸡", src_bcfip_lzj),
+        ("S27 BCFIP-洛璃", src_bcfip_luoli),
+        ("S28 BCFIP-gslege分国", src_bcfip_gslege),
+        ("S29 BCFIP-官方段合集", src_bcfip_official),
+        ("S30 BCFIP-CM优选", src_bcfip_cmliu2),
     ]
 
     raw_pool = []

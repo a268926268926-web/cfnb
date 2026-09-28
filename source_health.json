@@ -1,0 +1,176 @@
+{
+ "订阅器:Mia": {
+  "zeros": 10,
+  "dead": true,
+  "_note": "302->t.me/MiaChatChannel TG 门禁；恢复后删掉本键"
+ },
+ "_comment": "连续 10 轮 0 候选自动标 dead；复活=删掉对应键",
+ "S1 CMzip": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S2 v2too": {
+  "zeros": 10,
+  "dead": true
+ },
+ "S3 danfeng2": {
+  "zeros": 10,
+  "dead": true
+ },
+ "S4 cfyxip": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S5 Lancelot": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S6 BestCFip": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S7 addressesapi": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S8 svip-s": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S9 CF 官方段": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S10 CF 官方采样": {
+  "zeros": 10,
+  "dead": true
+ },
+ "S11 良心云": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S12 ymyuuu-IPDB": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S13 hubbylei-bestcf": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S14 优选域名": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:Kristi": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:辣椒炒肉": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:cmin2": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:58807": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:CM官方": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:Moist_R": {
+  "zeros": 10,
+  "dead": true
+ },
+ "订阅器:辣子鸡": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:S5公益": {
+  "zeros": 2,
+  "dead": false
+ },
+ "订阅器:周润发": {
+  "zeros": 10,
+  "dead": true
+ },
+ "订阅器:DanFeng": {
+  "zeros": 10,
+  "dead": true
+ },
+ "订阅器:天诚": {
+  "zeros": 10,
+  "dead": true
+ },
+ "S15 优选订阅器": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S16 sanzang聚合": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S17 gslege分国": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S18 luckyops池": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S19 HHP测速": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S20 vipmc": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S21 辣子鸡全量": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S22 亚太top10": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S23 164746榜": {
+  "zeros": 0,
+  "dead": false
+ },
+ "订阅器:洛璃": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S24 doghelWang边缘": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S25 BCFIP-天诚": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S26 BCFIP-辣子鸡": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S27 BCFIP-洛璃": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S28 BCFIP-gslege分国": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S29 BCFIP-官方段合集": {
+  "zeros": 0,
+  "dead": false
+ },
+ "S30 BCFIP-CM优选": {
+  "zeros": 0,
+  "dead": false
+ }
+}
